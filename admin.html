@@ -77,10 +77,25 @@
         </div>
     </div>
 
+    <!-- Custom Modal -->
+    <div id="custom-modal" class="fixed inset-0 bg-black bg-opacity-60 z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md animate-scale-in">
+            <h3 id="modal-title" class="text-xl font-bold mb-4"></h3>
+            <p id="modal-message" class="text-gray-600 mb-6"></p>
+            <div id="modal-buttons" class="flex justify-end space-x-4">
+                <!-- Buttons will be injected here -->
+            </div>
+        </div>
+    </div>
+    <style>
+      @keyframes scale-in { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+      .animate-scale-in { animation: scale-in 0.3s ease-out forwards; }
+    </style>
+
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig, adminCredentials } from './config.js';
 
         const app = initializeApp(firebaseConfig);
@@ -103,8 +118,46 @@
         const cancelEditBtn = document.getElementById('cancel-edit-btn');
         const documentsList = document.getElementById('documents-list');
 
+        // --- Custom Modal Module ---
+        const modal = {
+            el: document.getElementById('custom-modal'),
+            title: document.getElementById('modal-title'),
+            message: document.getElementById('modal-message'),
+            buttons: document.getElementById('modal-buttons'),
+            show: (title, message, buttons = [{ text: 'OK', class: 'bg-blue-600 hover:bg-blue-700', action: () => modal.hide() }]) => {
+                modal.title.textContent = title;
+                modal.message.textContent = message;
+                modal.buttons.innerHTML = '';
+                buttons.forEach(btnInfo => {
+                    const button = document.createElement('button');
+                    button.textContent = btnInfo.text;
+                    button.className = `text-white font-bold py-2 px-4 rounded-lg transition ${btnInfo.class}`;
+                    button.onclick = btnInfo.action;
+                    modal.buttons.appendChild(button);
+                });
+                modal.el.classList.remove('hidden');
+                modal.el.classList.add('flex');
+            },
+            hide: () => {
+                modal.el.classList.add('hidden');
+                modal.el.classList.remove('flex');
+            },
+            alert: (title, message) => {
+                modal.show(title, message);
+            },
+            confirm: (title, message, onConfirm) => {
+                const buttons = [
+                    { text: 'Hủy', class: 'bg-gray-500 hover:bg-gray-600', action: () => modal.hide() },
+                    { text: 'Xác nhận', class: 'bg-red-600 hover:bg-red-700', action: () => { onConfirm(); modal.hide(); } }
+                ];
+                modal.show(title, message, buttons);
+            }
+        };
+
+
         // --- Admin Module ---
         const adminModule = {
+            documents: [],
             isLoggedIn: () => sessionStorage.getItem('isAdmin') === 'true',
 
             login: (username, password) => {
@@ -131,11 +184,11 @@
 
             addDocument: async (name, category, url) => {
                 try {
-                    await addDoc(documentsCollection, { name, category, url, createdAt: new Date() });
+                    await addDoc(documentsCollection, { name, category, url, createdAt: serverTimestamp() });
                     documentForm.reset();
                 } catch (e) {
                     console.error("Error adding document: ", e);
-                    alert("Có lỗi xảy ra khi thêm văn kiện.");
+                    modal.alert("Lỗi Thao Tác", "Có lỗi xảy ra khi thêm văn kiện. Vui lòng kiểm tra lại Security Rules trên Firebase và thử lại.");
                 }
             },
 
@@ -146,19 +199,19 @@
                     adminModule.resetForm();
                 } catch (e) {
                     console.error("Error updating document: ", e);
-                    alert("Có lỗi xảy ra khi cập nhật văn kiện.");
+                    modal.alert("Lỗi Thao Tác", "Có lỗi xảy ra khi cập nhật văn kiện.");
                 }
             },
 
             deleteDocument: async (id) => {
-                if (confirm('Bạn có chắc chắn muốn xóa văn kiện này không?')) {
+                 modal.confirm('Xác nhận xóa', 'Bạn có chắc chắn muốn xóa văn kiện này không?', async () => {
                     try {
                         await deleteDoc(doc(db, "documents", id));
                     } catch (e) {
                         console.error("Error deleting document: ", e);
-                        alert("Có lỗi xảy ra khi xóa văn kiện.");
+                        modal.alert("Lỗi Thao Tác", "Có lỗi xảy ra khi xóa văn kiện.");
                     }
-                }
+                });
             },
             
             populateFormForEdit: (id, name, category, url) => {
@@ -190,19 +243,19 @@
                     documentsList.innerHTML = '<p class="text-gray-500 text-center">Chưa có văn kiện nào.</p>';
                     return;
                 }
-                docs.forEach(doc => {
-                    const data = doc.data();
+                docs.forEach(docItem => {
+                    const data = docItem.data();
                     const docEl = document.createElement('div');
                     docEl.className = 'flex flex-col md:flex-row justify-between items-start md:items-center p-4 border rounded-lg hover:bg-gray-50 transition';
                     docEl.innerHTML = `
-                        <div class="flex-1 mb-4 md:mb-0">
+                        <div class="flex-1 mb-4 md:mb-0 mr-4">
                             <p class="font-bold text-lg text-blue-800">${data.name}</p>
                             <p class="text-sm text-gray-600"><strong>Danh mục:</strong> ${data.category}</p>
                             <a href="${data.url}" target="_blank" class="text-xs text-blue-500 hover:underline break-all">${data.url}</a>
                         </div>
-                        <div class="flex space-x-2">
-                            <button data-action="edit" data-id="${doc.id}" class="bg-yellow-500 text-white px-4 py-1 rounded-md text-sm font-semibold hover:bg-yellow-600">Sửa</button>
-                            <button data-action="delete" data-id="${doc.id}" class="bg-red-500 text-white px-4 py-1 rounded-md text-sm font-semibold hover:bg-red-600">Xóa</button>
+                        <div class="flex space-x-2 flex-shrink-0">
+                            <button data-action="edit" data-id="${docItem.id}" class="bg-yellow-500 text-white px-4 py-1 rounded-md text-sm font-semibold hover:bg-yellow-600">Sửa</button>
+                            <button data-action="delete" data-id="${docItem.id}" class="bg-red-500 text-white px-4 py-1 rounded-md text-sm font-semibold hover:bg-red-600">Xóa</button>
                         </div>
                     `;
                     documentsList.appendChild(docEl);
@@ -212,9 +265,11 @@
             listenForDocuments: () => {
                 const q = query(documentsCollection, orderBy("createdAt", "desc"));
                 onSnapshot(q, (snapshot) => {
+                    adminModule.documents = snapshot.docs; // Store docs for later use (e.g., editing)
                     adminModule.renderDocuments(snapshot.docs);
                 }, (error) => {
                     console.error("Error listening for documents: ", error);
+                    modal.alert('Lỗi Kết Nối', 'Không thể tải danh sách văn kiện từ Firestore.');
                 });
             },
 
@@ -248,22 +303,20 @@
                 cancelEditBtn.addEventListener('click', adminModule.resetForm);
 
                 documentsList.addEventListener('click', (e) => {
-                    if (e.target.dataset.action === 'delete') {
-                        adminModule.deleteDocument(e.target.dataset.id);
+                    const button = e.target.closest('button');
+                    if (!button) return;
+
+                    const { action, id } = button.dataset;
+
+                    if (action === 'delete') {
+                        adminModule.deleteDocument(id);
                     }
-                    if (e.target.dataset.action === 'edit') {
-                        const btn = e.target;
-                        const docEl = btn.closest('div.flex-col'); // Adjust selector if needed
-                        const id = btn.dataset.id;
-                        
-                        // Find the correct data to populate the form
-                        const docRef = doc(db, "documents", id);
-                        getDocs(query(documentsCollection)).then(snapshot => {
-                            const docData = snapshot.docs.find(d => d.id === id)?.data();
-                            if(docData) {
-                                adminModule.populateFormForEdit(id, docData.name, docData.category, docData.url);
-                            }
-                        });
+                    if (action === 'edit') {
+                        const docToEdit = adminModule.documents.find(d => d.id === id);
+                        if (docToEdit) {
+                            const data = docToEdit.data();
+                            adminModule.populateFormForEdit(id, data.name, data.category, data.url);
+                        }
                     }
                 });
             }
@@ -274,3 +327,4 @@
     </script>
 </body>
 </html>
+
