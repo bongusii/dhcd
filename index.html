@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Văn kiện - Đại hội Chi Đoàn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; overflow-x: hidden; }
+        #book-viewer {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background-color: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            perspective: 2000px;
+            z-index: 999;
+        }
+        #book {
+            width: 90vw;
+            height: 90vh;
+            max-width: 1200px;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.5s;
+        }
+        .page {
+            position: absolute;
+            width: 100%; height: 100%;
+            background-color: white;
+            backface-visibility: hidden;
+            transform-origin: left center;
+            transition: transform 1s ease-in-out;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .page canvas {
+            width: 100%;
+            height: 100%;
+        }
+        .page.flipped {
+            transform: rotateY(-180deg);
+        }
+        #nav-buttons {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .nav-btn {
+            background-color: #1d4ed8;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .nav-btn:hover { background-color: #1e40af; }
+        .nav-btn:disabled { background-color: #9ca3af; cursor: not-allowed; }
+        #page-info { color: white; font-size: 18px; font-weight: 500; }
+        #close-viewer {
+            position: fixed; top: 20px; right: 20px; z-index: 1001;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center my-8 md:my-12">
+            <h1 class="text-4xl md:text-5xl font-extrabold text-blue-700">VĂN KIỆN ĐẠI HỘI CHI ĐOÀN</h1>
+            <p class="text-lg text-gray-600 mt-2">Nhiệm kỳ 2024 - 2027</p>
+        </header>
+
+        <main id="document-categories" class="space-y-12">
+            <!-- Categories and documents will be dynamically inserted here -->
+            <div id="loading-spinner" class="text-center">
+                <svg class="animate-spin h-8 w-8 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="mt-2 text-gray-500">Đang tải danh sách văn kiện...</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Book Viewer -->
+    <div id="book-viewer" class="hidden">
+        <div id="book-container" class="w-full h-full flex justify-center items-center">
+             <div id="book">
+                <div id="page-left" class="page">
+                    <canvas id="canvas-left"></canvas>
+                </div>
+                <div id="page-right" class="page">
+                    <canvas id="canvas-right"></canvas>
+                </div>
+             </div>
+        </div>
+        <div id="nav-buttons">
+            <button id="prev-page" class="nav-btn">Trước</button>
+            <span id="page-info">Trang 0 / 0</span>
+            <button id="next-page" class="nav-btn">Sau</button>
+        </div>
+        <button id="close-viewer" class="nav-btn bg-red-600 hover:bg-red-700">Đóng</button>
+    </div>
+
+
+    <!-- Firebase SDK and Viewer Module -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getFirestore, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { firebaseConfig } from './config.js';
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // --- PDF.js worker setup ---
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js`;
+
+        // --- Elements ---
+        const docCategoriesContainer = document.getElementById('document-categories');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const bookViewer = document.getElementById('book-viewer');
+        const book = document.getElementById('book');
+        const pageLeft = document.getElementById('page-left');
+        const pageRight = document.getElementById('page-right');
+        const canvasLeft = document.getElementById('canvas-left');
+        const canvasRight = document.getElementById('canvas-right');
+        const prevPageBtn = document.getElementById('prev-page');
+        const nextPageBtn = document.getElementById('next-page');
+        const pageInfo = document.getElementById('page-info');
+        const closeViewerBtn = document.getElementById('close-viewer');
+
+        // --- Viewer Module ---
+        const viewerModule = {
+            pdfDoc: null,
+            pageNum: 1,
+            numPages: 0,
+            isRendering: false,
+
+            fetchAndDisplayDocuments: async () => {
+                try {
+                    const q = query(collection(db, "documents"), orderBy("createdAt", "desc"));
+                    const querySnapshot = await getDocs(q);
+                    const docs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                    if (docs.length === 0) {
+                        docCategoriesContainer.innerHTML = '<p class="text-center text-gray-500">Hiện chưa có văn kiện nào được đăng tải.</p>';
+                        loadingSpinner.classList.add('hidden');
+                        return;
+                    }
+
+                    const categories = docs.reduce((acc, doc) => {
+                        (acc[doc.category] = acc[doc.category] || []).push(doc);
+                        return acc;
+                    }, {});
+
+                    docCategoriesContainer.innerHTML = ''; // Clear container
+                    for (const category in categories) {
+                        const categoryEl = document.createElement('section');
+                        let docsHtml = categories[category].map(doc => `
+                            <a href="#" data-url="${doc.url}" class="document-link block bg-white p-6 rounded-lg shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                                <h3 class="text-xl font-semibold text-blue-800">${doc.name}</h3>
+                            </a>
+                        `).join('');
+                        
+                        categoryEl.innerHTML = `
+                            <h2 class="text-3xl font-bold text-gray-800 mb-6 border-l-4 border-blue-600 pl-4">${category}</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                ${docsHtml}
+                            </div>
+                        `;
+                        docCategoriesContainer.appendChild(categoryEl);
+                    }
+                    loadingSpinner.classList.add('hidden');
+
+                } catch (error) {
+                    console.error("Error fetching documents: ", error);
+                    docCategoriesContainer.innerHTML = '<p class="text-center text-red-500">Không thể tải danh sách văn kiện. Vui lòng thử lại sau.</p>';
+                    loadingSpinner.classList.add('hidden');
+                }
+            },
+
+            openBook: async (url) => {
+                bookViewer.classList.remove('hidden');
+                document.body.style.overflow = 'hidden';
+                viewerModule.pageNum = 1;
+
+                // CORS proxy may be needed if PDF is on a different domain without proper headers
+                const proxyUrl = `https://cors-anywhere.herokuapp.com/${url}`;
+
+                try {
+                    const loadingTask = pdfjsLib.getDocument(proxyUrl);
+                    viewerModule.pdfDoc = await loadingTask.promise;
+                    viewerModule.numPages = viewerModule.pdfDoc.numPages;
+                    viewerModule.renderBook();
+                } catch (err) {
+                    console.error('Error opening PDF:', err);
+                    alert('Không thể mở file PDF. Có thể link đã hỏng hoặc cần cấu hình CORS.');
+                    viewerModule.closeBook();
+                }
+            },
+
+            closeBook: () => {
+                bookViewer.classList.add('hidden');
+                document.body.style.overflow = '';
+                viewerModule.pdfDoc = null;
+            },
+
+            renderPage: async (num, canvas) => {
+                viewerModule.isRendering = true;
+                const page = await viewerModule.pdfDoc.getPage(num);
+                const viewport = page.getViewport({ scale: 1.5 });
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                await page.render(renderContext).promise;
+                viewerModule.isRendering = false;
+            },
+            
+            renderBook: () => {
+                if (viewerModule.isRendering) return;
+
+                const currentPage = viewerModule.pageNum;
+                const totalPages = viewerModule.numPages;
+                
+                // Render left page
+                if (currentPage > 1) {
+                    pageLeft.style.visibility = 'visible';
+                    viewerModule.renderPage(currentPage - 1, canvasLeft);
+                } else {
+                    pageLeft.style.visibility = 'hidden';
+                }
+
+                // Render right page
+                if (currentPage <= totalPages) {
+                    pageRight.style.visibility = 'visible';
+                    viewerModule.renderPage(currentPage, canvasRight);
+                } else {
+                    pageRight.style.visibility = 'hidden';
+                }
+
+                pageInfo.textContent = `Trang ${currentPage-1}-${currentPage} / ${totalPages}`;
+                prevPageBtn.disabled = currentPage <= 1;
+                nextPageBtn.disabled = currentPage >= totalPages;
+            },
+            
+            turnPage: (direction) => {
+                const newPageNum = viewerModule.pageNum + (direction * 2);
+                if (newPageNum > 0 && newPageNum <= viewerModule.numPages + 1) {
+                     viewerModule.pageNum = newPageNum;
+                     viewerModule.renderBook();
+                }
+            },
+
+            init: () => {
+                viewerModule.fetchAndDisplayDocuments();
+
+                docCategoriesContainer.addEventListener('click', (e) => {
+                    const link = e.target.closest('.document-link');
+                    if (link) {
+                        e.preventDefault();
+                        const url = link.dataset.url;
+                        // Modify github blob link to raw link for direct access
+                        const rawUrl = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+                        viewerModule.openBook(rawUrl);
+                    }
+                });
+                
+                closeViewerBtn.addEventListener('click', viewerModule.closeBook);
+                prevPageBtn.addEventListener('click', () => viewerModule.turnPage(-1));
+                nextPageBtn.addEventListener('click', () => viewerModule.turnPage(1));
+                
+                // Keyboard navigation
+                document.addEventListener('keydown', (e) => {
+                    if (bookViewer.classList.contains('hidden')) return;
+                    if (e.key === 'ArrowLeft') viewerModule.turnPage(-1);
+                    if (e.key === 'ArrowRight') viewerModule.turnPage(1);
+                    if (e.key === 'Escape') viewerModule.closeBook();
+                });
+                
+            }
+        };
+
+        // --- Initialize ---
+        viewerModule.init();
+
+    </script>
+</body>
+</html>

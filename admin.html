@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản trị - Đại hội Chi Đoàn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div id="app" class="container mx-auto p-4 md:p-8 max-w-4xl">
+
+        <!-- Login View -->
+        <div id="login-view">
+            <div class="bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto mt-16">
+                <h1 class="text-3xl font-bold text-center text-blue-600 mb-2">Đăng Nhập Quản Trị</h1>
+                <p class="text-center text-gray-500 mb-6">Trang dành cho người quản lý.</p>
+                <form id="login-form">
+                    <div class="mb-4">
+                        <label for="username" class="block text-gray-700 font-medium mb-2">Tên đăng nhập</label>
+                        <input type="text" id="username" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div class="mb-6">
+                        <label for="password" class="block text-gray-700 font-medium mb-2">Mật khẩu</label>
+                        <input type="password" id="password" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition duration-300">Đăng Nhập</button>
+                    <p id="login-error" class="text-red-500 text-center mt-4"></p>
+                </form>
+            </div>
+        </div>
+
+        <!-- Admin Dashboard View -->
+        <div id="dashboard-view" class="hidden">
+            <div class="flex justify-between items-center mb-8">
+                <h1 class="text-4xl font-bold text-blue-700">Quản Lý Văn Kiện</h1>
+                <button id="logout-btn" class="bg-red-500 text-white font-bold px-6 py-2 rounded-lg hover:bg-red-600 transition duration-300">Đăng Xuất</button>
+            </div>
+
+            <!-- Form to Add/Edit Documents -->
+            <div class="bg-white p-8 rounded-xl shadow-lg mb-8">
+                <h2 id="form-title" class="text-2xl font-semibold mb-6">Thêm Văn Kiện Mới</h2>
+                <form id="document-form">
+                    <input type="hidden" id="document-id">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="document-name" class="block text-gray-700 font-medium mb-2">Tên văn bản</label>
+                            <input type="text" id="document-name" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        </div>
+                        <div>
+                            <label for="document-category" class="block text-gray-700 font-medium mb-2">Danh mục</label>
+                            <input type="text" id="document-category" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        </div>
+                    </div>
+                    <div class="mt-6">
+                        <label for="document-url" class="block text-gray-700 font-medium mb-2">Đường dẫn (URL) đến văn bản</label>
+                        <input type="url" id="document-url" placeholder="https://github.com/user/repo/blob/main/van-kien.pdf" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+                    <div class="mt-8 flex items-center space-x-4">
+                        <button type="submit" id="submit-btn" class="bg-green-600 text-white font-bold px-8 py-3 rounded-lg hover:bg-green-700 transition duration-300">Lưu Văn Kiện</button>
+                        <button type="button" id="cancel-edit-btn" class="bg-gray-500 text-white font-bold px-8 py-3 rounded-lg hover:bg-gray-600 transition duration-300 hidden">Hủy</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Documents List -->
+            <div>
+                <h2 class="text-2xl font-semibold mb-6">Danh Sách Văn Kiện Hiện Có</h2>
+                <div id="documents-list" class="bg-white p-6 rounded-xl shadow-lg space-y-4">
+                    <!-- Documents will be dynamically inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { firebaseConfig, adminCredentials } from './config.js';
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const documentsCollection = collection(db, "documents");
+
+        // --- Elements ---
+        const loginView = document.getElementById('login-view');
+        const dashboardView = document.getElementById('dashboard-view');
+        const loginForm = document.getElementById('login-form');
+        const loginError = document.getElementById('login-error');
+        const logoutBtn = document.getElementById('logout-btn');
+        const documentForm = document.getElementById('document-form');
+        const formTitle = document.getElementById('form-title');
+        const documentIdInput = document.getElementById('document-id');
+        const documentNameInput = document.getElementById('document-name');
+        const documentCategoryInput = document.getElementById('document-category');
+        const documentUrlInput = document.getElementById('document-url');
+        const submitBtn = document.getElementById('submit-btn');
+        const cancelEditBtn = document.getElementById('cancel-edit-btn');
+        const documentsList = document.getElementById('documents-list');
+
+        // --- Admin Module ---
+        const adminModule = {
+            isLoggedIn: () => sessionStorage.getItem('isAdmin') === 'true',
+
+            login: (username, password) => {
+                if (username === adminCredentials.username && password === adminCredentials.password) {
+                    sessionStorage.setItem('isAdmin', 'true');
+                    adminModule.showDashboard();
+                    return true;
+                }
+                loginError.textContent = 'Tên đăng nhập hoặc mật khẩu không chính xác.';
+                return false;
+            },
+
+            logout: () => {
+                sessionStorage.removeItem('isAdmin');
+                loginView.classList.remove('hidden');
+                dashboardView.classList.add('hidden');
+            },
+            
+            showDashboard: () => {
+                loginView.classList.add('hidden');
+                dashboardView.classList.remove('hidden');
+                adminModule.listenForDocuments();
+            },
+
+            addDocument: async (name, category, url) => {
+                try {
+                    await addDoc(documentsCollection, { name, category, url, createdAt: new Date() });
+                    documentForm.reset();
+                } catch (e) {
+                    console.error("Error adding document: ", e);
+                    alert("Có lỗi xảy ra khi thêm văn kiện.");
+                }
+            },
+
+            updateDocument: async (id, name, category, url) => {
+                try {
+                    const docRef = doc(db, "documents", id);
+                    await updateDoc(docRef, { name, category, url });
+                    adminModule.resetForm();
+                } catch (e) {
+                    console.error("Error updating document: ", e);
+                    alert("Có lỗi xảy ra khi cập nhật văn kiện.");
+                }
+            },
+
+            deleteDocument: async (id) => {
+                if (confirm('Bạn có chắc chắn muốn xóa văn kiện này không?')) {
+                    try {
+                        await deleteDoc(doc(db, "documents", id));
+                    } catch (e) {
+                        console.error("Error deleting document: ", e);
+                        alert("Có lỗi xảy ra khi xóa văn kiện.");
+                    }
+                }
+            },
+            
+            populateFormForEdit: (id, name, category, url) => {
+                formTitle.textContent = 'Chỉnh Sửa Văn Kiện';
+                documentIdInput.value = id;
+                documentNameInput.value = name;
+                documentCategoryInput.value = category;
+                documentUrlInput.value = url;
+                submitBtn.textContent = 'Cập Nhật';
+                submitBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                submitBtn.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+                cancelEditBtn.classList.remove('hidden');
+                window.scrollTo(0, 0);
+            },
+
+            resetForm: () => {
+                formTitle.textContent = 'Thêm Văn Kiện Mới';
+                documentForm.reset();
+                documentIdInput.value = '';
+                submitBtn.textContent = 'Lưu Văn Kiện';
+                submitBtn.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+                submitBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+                cancelEditBtn.classList.add('hidden');
+            },
+
+            renderDocuments: (docs) => {
+                documentsList.innerHTML = '';
+                 if (docs.length === 0) {
+                    documentsList.innerHTML = '<p class="text-gray-500 text-center">Chưa có văn kiện nào.</p>';
+                    return;
+                }
+                docs.forEach(doc => {
+                    const data = doc.data();
+                    const docEl = document.createElement('div');
+                    docEl.className = 'flex flex-col md:flex-row justify-between items-start md:items-center p-4 border rounded-lg hover:bg-gray-50 transition';
+                    docEl.innerHTML = `
+                        <div class="flex-1 mb-4 md:mb-0">
+                            <p class="font-bold text-lg text-blue-800">${data.name}</p>
+                            <p class="text-sm text-gray-600"><strong>Danh mục:</strong> ${data.category}</p>
+                            <a href="${data.url}" target="_blank" class="text-xs text-blue-500 hover:underline break-all">${data.url}</a>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button data-action="edit" data-id="${doc.id}" class="bg-yellow-500 text-white px-4 py-1 rounded-md text-sm font-semibold hover:bg-yellow-600">Sửa</button>
+                            <button data-action="delete" data-id="${doc.id}" class="bg-red-500 text-white px-4 py-1 rounded-md text-sm font-semibold hover:bg-red-600">Xóa</button>
+                        </div>
+                    `;
+                    documentsList.appendChild(docEl);
+                });
+            },
+            
+            listenForDocuments: () => {
+                const q = query(documentsCollection, orderBy("createdAt", "desc"));
+                onSnapshot(q, (snapshot) => {
+                    adminModule.renderDocuments(snapshot.docs);
+                }, (error) => {
+                    console.error("Error listening for documents: ", error);
+                });
+            },
+
+            init: () => {
+                if (adminModule.isLoggedIn()) {
+                    adminModule.showDashboard();
+                }
+
+                loginForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const username = e.target.username.value;
+                    const password = e.target.password.value;
+                    adminModule.login(username, password);
+                });
+
+                logoutBtn.addEventListener('click', adminModule.logout);
+
+                documentForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const id = documentIdInput.value;
+                    const name = documentNameInput.value;
+                    const category = documentCategoryInput.value;
+                    const url = documentUrlInput.value;
+                    if (id) {
+                        adminModule.updateDocument(id, name, category, url);
+                    } else {
+                        adminModule.addDocument(name, category, url);
+                    }
+                });
+                
+                cancelEditBtn.addEventListener('click', adminModule.resetForm);
+
+                documentsList.addEventListener('click', (e) => {
+                    if (e.target.dataset.action === 'delete') {
+                        adminModule.deleteDocument(e.target.dataset.id);
+                    }
+                    if (e.target.dataset.action === 'edit') {
+                        const btn = e.target;
+                        const docEl = btn.closest('div.flex-col'); // Adjust selector if needed
+                        const id = btn.dataset.id;
+                        
+                        // Find the correct data to populate the form
+                        const docRef = doc(db, "documents", id);
+                        getDocs(query(documentsCollection)).then(snapshot => {
+                            const docData = snapshot.docs.find(d => d.id === id)?.data();
+                            if(docData) {
+                                adminModule.populateFormForEdit(id, docData.name, docData.category, docData.url);
+                            }
+                        });
+                    }
+                });
+            }
+        };
+
+        // --- Initialize ---
+        adminModule.init();
+    </script>
+</body>
+</html>
