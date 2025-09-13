@@ -161,7 +161,7 @@
         // --- Viewer Module ---
         const viewerModule = {
             pdfDoc: null,
-            currentPageNum: 0, 
+            currentPageNum: 1, // Start with page 1
             numPages: 0,
             isRendering: false,
 
@@ -223,11 +223,11 @@
             openBook: async (url) => {
                 bookViewer.classList.add('visible');
                 document.body.style.overflow = 'hidden';
-                viewerModule.currentPageNum = 0;
+                viewerModule.currentPageNum = 1; // Always start on page 1
                 viewerModule.showViewerStatus('⏳ Đang tải văn kiện...');
                 
-                // *** NEW: Using a CORS proxy to prevent cross-origin issues ***
-                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+                // *** Using a more reliable CORS proxy ***
+                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
                 console.log(`Attempting to open PDF via proxy: ${proxyUrl}`);
 
                 try {
@@ -273,15 +273,22 @@
                 if (viewerModule.isRendering || !viewerModule.pdfDoc) return;
                 viewerModule.isRendering = true;
 
-                const leftPage = viewerModule.currentPageNum;
-                const rightPage = viewerModule.currentPageNum + 1;
+                const rightPage = viewerModule.currentPageNum;
+                const leftPage = rightPage - 1;
                 
                 await Promise.all([
                     viewerModule.renderPage(leftPage, canvasLeft),
                     viewerModule.renderPage(rightPage, canvasRight)
                 ]);
                 
-                pageInfo.textContent = `Trang ${leftPage}-${rightPage} / ${viewerModule.numPages}`;
+                if (leftPage === 0) {
+                    pageInfo.textContent = `Trang ${rightPage} / ${viewerModule.numPages}`;
+                } else if (rightPage > viewerModule.numPages) {
+                    pageInfo.textContent = `Trang ${leftPage} / ${viewerModule.numPages}`;
+                } else {
+                    pageInfo.textContent = `Trang ${leftPage}-${rightPage} / ${viewerModule.numPages}`;
+                }
+
                 prevPageBtn.disabled = leftPage <= 0;
                 nextPageBtn.disabled = rightPage >= viewerModule.numPages;
                 viewerModule.isRendering = false;
@@ -290,7 +297,7 @@
             turnPage: (direction) => {
                 if(viewerModule.isRendering) return;
                 const newPageNum = viewerModule.currentPageNum + (direction * 2);
-                if (newPageNum >= 0 && newPageNum <= viewerModule.numPages) {
+                if (newPageNum >= 1 && (newPageNum - 1) <= viewerModule.numPages) {
                      viewerModule.currentPageNum = newPageNum;
                      viewerModule.renderBook();
                 }
@@ -305,7 +312,6 @@
                         e.preventDefault();
                         const url = link.dataset.url;
                         console.log(`Document link clicked: ${url}`);
-                        // Modify github blob link to raw link for direct access
                         const rawUrl = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
                         viewerModule.openBook(rawUrl);
                     }
