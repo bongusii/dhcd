@@ -13,37 +13,39 @@
             position: fixed;
             top: 0; left: 0;
             width: 100vw; height: 100vh;
-            background-color: rgba(0,0,0,0.8);
+            background-color: rgba(0,0,0,0.85);
             display: flex;
             justify-content: center;
             align-items: center;
-            perspective: 2000px;
             z-index: 999;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        #book-viewer.visible {
+            opacity: 1;
+            visibility: visible;
         }
         #book {
             width: 90vw;
             height: 90vh;
             max-width: 1200px;
-            position: relative;
-            transform-style: preserve-3d;
-            transition: transform 0.5s;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
         }
         .page {
-            position: absolute;
-            width: 100%; height: 100%;
             background-color: white;
-            backface-visibility: hidden;
-            transform-origin: left center;
-            transition: transform 1s ease-in-out;
             box-shadow: 0 0 20px rgba(0,0,0,0.2);
             overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         .page canvas {
-            width: 100%;
-            height: 100%;
-        }
-        .page.flipped {
-            transform: rotateY(-180deg);
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
         }
         #nav-buttons {
             position: fixed;
@@ -54,23 +56,38 @@
             display: flex;
             align-items: center;
             gap: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 16px;
+            border-radius: 12px;
         }
         .nav-btn {
             background-color: #1d4ed8;
             color: white;
             border: none;
-            padding: 12px 24px;
+            padding: 10px 20px;
             border-radius: 8px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
             transition: background-color 0.3s;
         }
-        .nav-btn:hover { background-color: #1e40af; }
-        .nav-btn:disabled { background-color: #9ca3af; cursor: not-allowed; }
-        #page-info { color: white; font-size: 18px; font-weight: 500; }
+        .nav-btn:hover:not(:disabled) { background-color: #1e40af; }
+        .nav-btn:disabled { background-color: #6b7280; cursor: not-allowed; }
+        #page-info { color: white; font-size: 16px; font-weight: 500; min-width: 120px; text-align: center;}
         #close-viewer {
             position: fixed; top: 20px; right: 20px; z-index: 1001;
+        }
+        #viewer-status {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            text-align: center;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1002;
         }
     </style>
 </head>
@@ -84,7 +101,7 @@
 
         <main id="document-categories" class="space-y-12">
             <!-- Categories and documents will be dynamically inserted here -->
-            <div id="loading-spinner" class="text-center">
+            <div id="loading-spinner" class="text-center py-12">
                 <svg class="animate-spin h-8 w-8 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -95,16 +112,17 @@
     </div>
 
     <!-- Book Viewer -->
-    <div id="book-viewer" class="hidden">
-        <div id="book-container" class="w-full h-full flex justify-center items-center">
-             <div id="book">
-                <div id="page-left" class="page">
-                    <canvas id="canvas-left"></canvas>
-                </div>
-                <div id="page-right" class="page">
-                    <canvas id="canvas-right"></canvas>
-                </div>
-             </div>
+    <div id="book-viewer">
+        <div id="viewer-status" class="hidden">
+            <p id="viewer-status-text" class="text-xl"></p>
+        </div>
+        <div id="book">
+            <div id="page-left" class="page">
+                <canvas id="canvas-left"></canvas>
+            </div>
+            <div id="page-right" class="page">
+                <canvas id="canvas-right"></canvas>
+            </div>
         </div>
         <div id="nav-buttons">
             <button id="prev-page" class="nav-btn">Trước</button>
@@ -113,7 +131,6 @@
         </div>
         <button id="close-viewer" class="nav-btn bg-red-600 hover:bg-red-700">Đóng</button>
     </div>
-
 
     <!-- Firebase SDK and Viewer Module -->
     <script type="module">
@@ -131,9 +148,9 @@
         const docCategoriesContainer = document.getElementById('document-categories');
         const loadingSpinner = document.getElementById('loading-spinner');
         const bookViewer = document.getElementById('book-viewer');
-        const book = document.getElementById('book');
-        const pageLeft = document.getElementById('page-left');
-        const pageRight = document.getElementById('page-right');
+        const viewerStatus = document.getElementById('viewer-status');
+        const viewerStatusText = document.getElementById('viewer-status-text');
+        const bookDiv = document.getElementById('book');
         const canvasLeft = document.getElementById('canvas-left');
         const canvasRight = document.getElementById('canvas-right');
         const prevPageBtn = document.getElementById('prev-page');
@@ -144,19 +161,22 @@
         // --- Viewer Module ---
         const viewerModule = {
             pdfDoc: null,
-            pageNum: 1,
+            currentPageNum: 0, 
             numPages: 0,
             isRendering: false,
 
             fetchAndDisplayDocuments: async () => {
+                console.log("Fetching documents from Firestore...");
                 try {
                     const q = query(collection(db, "documents"), orderBy("createdAt", "desc"));
                     const querySnapshot = await getDocs(q);
                     const docs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    
+                    console.log(`Found ${docs.length} documents.`);
 
+                    loadingSpinner.classList.add('hidden');
                     if (docs.length === 0) {
                         docCategoriesContainer.innerHTML = '<p class="text-center text-gray-500">Hiện chưa có văn kiện nào được đăng tải.</p>';
-                        loadingSpinner.classList.add('hidden');
                         return;
                     }
 
@@ -165,7 +185,7 @@
                         return acc;
                     }, {});
 
-                    docCategoriesContainer.innerHTML = ''; // Clear container
+                    docCategoriesContainer.innerHTML = '';
                     for (const category in categories) {
                         const categoryEl = document.createElement('section');
                         let docsHtml = categories[category].map(doc => `
@@ -182,88 +202,96 @@
                         `;
                         docCategoriesContainer.appendChild(categoryEl);
                     }
-                    loadingSpinner.classList.add('hidden');
-
                 } catch (error) {
                     console.error("Error fetching documents: ", error);
-                    docCategoriesContainer.innerHTML = '<p class="text-center text-red-500">Không thể tải danh sách văn kiện. Vui lòng thử lại sau.</p>';
+                    docCategoriesContainer.innerHTML = '<p class="text-center text-red-500">Không thể tải danh sách văn kiện. Vui lòng kiểm tra Security Rules và Index trên Firebase.</p>';
                     loadingSpinner.classList.add('hidden');
                 }
             },
 
-            openBook: async (url) => {
-                bookViewer.classList.remove('hidden');
-                document.body.style.overflow = 'hidden';
-                viewerModule.pageNum = 1;
+            showViewerStatus: (message) => {
+                viewerStatusText.textContent = message;
+                viewerStatus.classList.remove('hidden');
+                bookDiv.classList.add('hidden');
+            },
 
-                // CORS proxy may be needed if PDF is on a different domain without proper headers
-                const proxyUrl = `https://cors-anywhere.herokuapp.com/${url}`;
+            hideViewerStatus: () => {
+                viewerStatus.classList.add('hidden');
+                bookDiv.classList.remove('hidden');
+            },
+
+            openBook: async (url) => {
+                bookViewer.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+                viewerModule.currentPageNum = 0;
+                viewerModule.showViewerStatus('⏳ Đang tải văn kiện...');
+                
+                // *** NEW: Using a CORS proxy to prevent cross-origin issues ***
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+                console.log(`Attempting to open PDF via proxy: ${proxyUrl}`);
 
                 try {
                     const loadingTask = pdfjsLib.getDocument(proxyUrl);
                     viewerModule.pdfDoc = await loadingTask.promise;
                     viewerModule.numPages = viewerModule.pdfDoc.numPages;
+                    viewerModule.hideViewerStatus();
                     viewerModule.renderBook();
                 } catch (err) {
                     console.error('Error opening PDF:', err);
-                    alert('Không thể mở file PDF. Có thể link đã hỏng hoặc cần cấu hình CORS.');
-                    viewerModule.closeBook();
+                    viewerModule.showViewerStatus(`❌ Lỗi tải file\nKhông thể mở file PDF. Vui lòng kiểm tra lại đường dẫn hoặc kết nối mạng.`);
                 }
             },
 
             closeBook: () => {
-                bookViewer.classList.add('hidden');
+                bookViewer.classList.remove('visible');
                 document.body.style.overflow = '';
                 viewerModule.pdfDoc = null;
+                const clearCanvas = (canvas) => {
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                };
+                clearCanvas(canvasLeft);
+                clearCanvas(canvasRight);
             },
 
             renderPage: async (num, canvas) => {
-                viewerModule.isRendering = true;
+                 if (num <= 0 || num > viewerModule.numPages) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    return;
+                }
                 const page = await viewerModule.pdfDoc.getPage(num);
                 const viewport = page.getViewport({ scale: 1.5 });
                 const context = canvas.getContext('2d');
                 canvas.height = viewport.height;
                 canvas.width = viewport.width;
                 
-                const renderContext = {
-                    canvasContext: context,
-                    viewport: viewport
-                };
-                await page.render(renderContext).promise;
+                await page.render({ canvasContext: context, viewport }).promise;
+            },
+            
+            renderBook: async () => {
+                if (viewerModule.isRendering || !viewerModule.pdfDoc) return;
+                viewerModule.isRendering = true;
+
+                const leftPage = viewerModule.currentPageNum;
+                const rightPage = viewerModule.currentPageNum + 1;
+                
+                await Promise.all([
+                    viewerModule.renderPage(leftPage, canvasLeft),
+                    viewerModule.renderPage(rightPage, canvasRight)
+                ]);
+                
+                pageInfo.textContent = `Trang ${leftPage}-${rightPage} / ${viewerModule.numPages}`;
+                prevPageBtn.disabled = leftPage <= 0;
+                nextPageBtn.disabled = rightPage >= viewerModule.numPages;
                 viewerModule.isRendering = false;
             },
             
-            renderBook: () => {
-                if (viewerModule.isRendering) return;
-
-                const currentPage = viewerModule.pageNum;
-                const totalPages = viewerModule.numPages;
-                
-                // Render left page
-                if (currentPage > 1) {
-                    pageLeft.style.visibility = 'visible';
-                    viewerModule.renderPage(currentPage - 1, canvasLeft);
-                } else {
-                    pageLeft.style.visibility = 'hidden';
-                }
-
-                // Render right page
-                if (currentPage <= totalPages) {
-                    pageRight.style.visibility = 'visible';
-                    viewerModule.renderPage(currentPage, canvasRight);
-                } else {
-                    pageRight.style.visibility = 'hidden';
-                }
-
-                pageInfo.textContent = `Trang ${currentPage-1}-${currentPage} / ${totalPages}`;
-                prevPageBtn.disabled = currentPage <= 1;
-                nextPageBtn.disabled = currentPage >= totalPages;
-            },
-            
             turnPage: (direction) => {
-                const newPageNum = viewerModule.pageNum + (direction * 2);
-                if (newPageNum > 0 && newPageNum <= viewerModule.numPages + 1) {
-                     viewerModule.pageNum = newPageNum;
+                if(viewerModule.isRendering) return;
+                const newPageNum = viewerModule.currentPageNum + (direction * 2);
+                if (newPageNum >= 0 && newPageNum <= viewerModule.numPages) {
+                     viewerModule.currentPageNum = newPageNum;
                      viewerModule.renderBook();
                 }
             },
@@ -276,6 +304,7 @@
                     if (link) {
                         e.preventDefault();
                         const url = link.dataset.url;
+                        console.log(`Document link clicked: ${url}`);
                         // Modify github blob link to raw link for direct access
                         const rawUrl = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
                         viewerModule.openBook(rawUrl);
@@ -286,20 +315,18 @@
                 prevPageBtn.addEventListener('click', () => viewerModule.turnPage(-1));
                 nextPageBtn.addEventListener('click', () => viewerModule.turnPage(1));
                 
-                // Keyboard navigation
                 document.addEventListener('keydown', (e) => {
-                    if (bookViewer.classList.contains('hidden')) return;
-                    if (e.key === 'ArrowLeft') viewerModule.turnPage(-1);
-                    if (e.key === 'ArrowRight') viewerModule.turnPage(1);
+                    if (!bookViewer.classList.contains('visible') || !viewerModule.pdfDoc) return;
+                    if (e.key === 'ArrowLeft') prevPageBtn.click();
+                    if (e.key === 'ArrowRight') nextPageBtn.click();
                     if (e.key === 'Escape') viewerModule.closeBook();
                 });
-                
             }
         };
 
         // --- Initialize ---
         viewerModule.init();
-
     </script>
 </body>
 </html>
+
